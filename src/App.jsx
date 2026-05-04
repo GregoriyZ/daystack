@@ -37,31 +37,56 @@ export default function App() {
   const syncFeed = useCallback(async (feed) => {
     if (!feed.url) return
     setFeedStatus(feed.id, { state: 'syncing', message: '' })
-    try {
-      const res = await fetch(feed.url)
+
+    // Normalise webcal:// → https://
+    const normalise = (u) => u.replace(/^webcal:\/\//i, 'https://')
+
+    const fetchIcal = async (url) => {
+      const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const text = await res.text()
-      const events = parseICalForDate(text, getTodayStr()).map((e) => ({
+      return res.text()
+    }
+
+    const applyEvents = (text) =>
+      parseICalForDate(text, getTodayStr()).map((e) => ({
         ...e,
         calendarId:    feed.id,
         calendarColor: feed.color,
         calendarName:  feed.name,
       }))
-      setFeedEvents((prev) => ({ ...prev, [feed.id]: events }))
-      setFeedStatus(feed.id, {
-        state: 'ok',
-        message: '',
-        lastSynced: new Date().toLocaleTimeString('en-AU', {
-          hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Melbourne',
-        }),
-      })
-    } catch (err) {
-      const message =
-        err instanceof TypeError
-          ? "Can't fetch directly from the browser (CORS). Try prefixing with https://corsproxy.io/? or use a Google Calendar public URL."
-          : `Sync failed: ${err.message}`
-      setFeedStatus(feed.id, { state: 'error', message })
+
+    const url = normalise(feed.url)
+    let text
+
+    try {
+      text = await fetchIcal(url)
+    } catch (directErr) {
+      // CORS or network error — silently retry through a proxy
+      if (directErr instanceof TypeError) {
+        try {
+          const proxied = `https://corsproxy.io/?url=${encodeURIComponent(url)}`
+          text = await fetchIcal(proxied)
+        } catch (proxyErr) {
+          setFeedStatus(feed.id, {
+            state: 'error',
+            message: `Direct fetch blocked by CORS; proxy also failed: ${proxyErr.message}`,
+          })
+          return
+        }
+      } else {
+        setFeedStatus(feed.id, { state: 'error', message: directErr.message })
+        return
+      }
     }
+
+    setFeedEvents((prev) => ({ ...prev, [feed.id]: applyEvents(text) }))
+    setFeedStatus(feed.id, {
+      state: 'ok',
+      message: '',
+      lastSynced: new Date().toLocaleTimeString('en-AU', {
+        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Melbourne',
+      }),
+    })
   }, [setFeedStatus])
 
   const syncAllFeeds = useCallback((feeds) => {
