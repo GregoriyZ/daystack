@@ -58,23 +58,43 @@ export default function App() {
     const url = normalise(feed.url)
     let text
 
+    // Proxies tried in order when a direct fetch is CORS-blocked.
+    // corsproxy.io format: https://corsproxy.io/?{url}  (no "url=" key)
+    // allorigins format:   https://api.allorigins.win/raw?url={encoded}
+    const PROXIES = [
+      (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+      (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    ]
+
     try {
       text = await fetchIcal(url)
     } catch (directErr) {
-      // CORS or network error — silently retry through a proxy
-      if (directErr instanceof TypeError) {
-        try {
-          const proxied = `https://corsproxy.io/?url=${encodeURIComponent(url)}`
-          text = await fetchIcal(proxied)
-        } catch (proxyErr) {
-          setFeedStatus(feed.id, {
-            state: 'error',
-            message: `Direct fetch blocked by CORS; proxy also failed: ${proxyErr.message}`,
-          })
-          return
-        }
-      } else {
+      if (!(directErr instanceof TypeError)) {
+        // Non-CORS error (e.g. HTTP 4xx on the direct URL) — no point proxying
         setFeedStatus(feed.id, { state: 'error', message: directErr.message })
+        return
+      }
+
+      // CORS blocked — try each proxy in turn
+      let lastErr
+      for (const buildProxy of PROXIES) {
+        try {
+          text = await fetchIcal(buildProxy(url))
+          lastErr = null
+          break
+        } catch (proxyErr) {
+          lastErr = proxyErr
+        }
+      }
+
+      if (lastErr) {
+        setFeedStatus(feed.id, {
+          state: 'error',
+          message:
+            lastErr.message.includes('403')
+              ? 'Google returned 403 — make sure you copied the Secret address in iCal format (Calendar settings → Integrate calendar), not the public sharing link.'
+              : `All proxy attempts failed: ${lastErr.message}`,
+        })
         return
       }
     }
