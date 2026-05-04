@@ -24,3 +24,17 @@ export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 export const DAY_START_MIN = 7 * 60   // 07:00
 export const DAY_END_MIN   = 22 * 60  // 22:00
 export const MIN_FREE_GAP  = 45
+
+// Preset swatches for calendar feeds
+export const CALENDAR_PALETTE = [
+  '#2563EB', // blue
+  '#16A34A', // green
+  '#DC2626', // red
+  '#D97706', // amber
+  '#7C3AED', // violet
+  '#DB2777', // pink
+  '#0891B2', // cyan
+  '#65A30D', // lime
+  '#EA580C', // orange
+  '#6B7280', // grey
+]

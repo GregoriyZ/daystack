@@ -70,10 +70,12 @@ export default function TodayView({ events, deadlines, setView }) {
         ) : (
           <div className="space-y-0">
             {events.map((event) => {
-              const startMin = minutesSinceMidnight(event.start)
-              const endMin   = minutesSinceMidnight(event.end)
-              const isPast   = endMin < nowMin
-              const colors   = SUBJECT_COLORS[event.subject] ?? SUBJECT_COLORS['Other']
+              const startMin  = minutesSinceMidnight(event.start)
+              const endMin    = minutesSinceMidnight(event.end)
+              const isPast    = endMin < nowMin
+              const colors    = SUBJECT_COLORS[event.subject] ?? SUBJECT_COLORS['Other']
+              // Use the calendar's assigned colour for the bar; fall back to subject colour
+              const barColor  = event.calendarColor ?? colors.bg
 
               return (
                 <div
@@ -87,11 +89,21 @@ export default function TodayView({ events, deadlines, setView }) {
                   </div>
                   <div
                     className="w-1 rounded-full shrink-0 self-stretch"
-                    style={{ backgroundColor: colors.bg }}
+                    style={{ backgroundColor: barColor }}
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{event.name}</p>
-                    <SubjectTag subject={event.subject} small />
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      <SubjectTag subject={event.subject} small />
+                      {event.calendarName && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{ backgroundColor: barColor + '22', color: barColor }}
+                        >
+                          {event.calendarName}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )

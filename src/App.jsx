@@ -8,58 +8,79 @@ import TodayView from './components/views/TodayView'
 import DeadlinesView from './components/views/DeadlinesView'
 import GymView from './components/views/GymView'
 
+// icalFeeds shape stored in localStorage:
+// [{ id, name, url, color, enabled }]
+//
+// feedStatuses shape (in-memory only, not persisted):
+// { [id]: { state: 'idle'|'syncing'|'ok'|'error', message: string, lastSynced: string } }
+
 export default function App() {
-  const [view, setView]               = useState('today')
+  const [view, setView]                 = useState('today')
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Persisted state
   const [deadlines,    setDeadlines]    = useLocalStorage('daystack_deadlines',     [])
   const [gymSessions,  setGymSessions]  = useLocalStorage('daystack_gym',           [])
-  const [icalUrl,      setIcalUrl]      = useLocalStorage('daystack_ical_url',      '')
+  const [icalFeeds,    setIcalFeeds]    = useLocalStorage('daystack_ical_feeds',    [])
   const [manualEvents, setManualEvents] = useLocalStorage('daystack_manual_events', [])
 
-  // iCal sync state (in-memory only)
-  const [calendarEvents, setCalendarEvents] = useState([])
-  const [lastSynced,     setLastSynced]     = useState(null)
-  const [icalError,      setIcalError]      = useState('')
+  // Per-feed sync status (in-memory only)
+  const [feedStatuses, setFeedStatuses] = useState({})
 
-  const syncIcal = useCallback(async (url) => {
-    if (!url) return
-    setIcalError('')
+  // Events fetched from all feeds, keyed by feed id
+  const [feedEvents, setFeedEvents] = useState({})
+
+  const setFeedStatus = useCallback((id, patch) =>
+    setFeedStatuses((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...patch } })),
+  [])
+
+  const syncFeed = useCallback(async (feed) => {
+    if (!feed.url) return
+    setFeedStatus(feed.id, { state: 'syncing', message: '' })
     try {
-      const res = await fetch(url)
+      const res = await fetch(feed.url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const text = await res.text()
-      const events = parseICalForDate(text, getTodayStr())
-      setCalendarEvents(events)
-      setLastSynced(
-        new Date().toLocaleTimeString('en-AU', {
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-          timeZone: 'Australia/Melbourne',
+      const events = parseICalForDate(text, getTodayStr()).map((e) => ({
+        ...e,
+        calendarId:    feed.id,
+        calendarColor: feed.color,
+        calendarName:  feed.name,
+      }))
+      setFeedEvents((prev) => ({ ...prev, [feed.id]: events }))
+      setFeedStatus(feed.id, {
+        state: 'ok',
+        message: '',
+        lastSynced: new Date().toLocaleTimeString('en-AU', {
+          hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Melbourne',
         }),
-      )
+      })
     } catch (err) {
-      const msg =
+      const message =
         err instanceof TypeError
-          ? "Can't fetch this URL directly from the browser (CORS). Try a CORS proxy or check Notion's export settings."
+          ? "Can't fetch directly from the browser (CORS). Try prefixing with https://corsproxy.io/? or use a Google Calendar public URL."
           : `Sync failed: ${err.message}`
-      setIcalError(msg)
+      setFeedStatus(feed.id, { state: 'error', message })
     }
-  }, [])
+  }, [setFeedStatus])
 
-  // Auto-sync on first load if a URL is already stored
+  const syncAllFeeds = useCallback((feeds) => {
+    const enabled = (feeds ?? icalFeeds).filter((f) => f.enabled !== false)
+    enabled.forEach(syncFeed)
+  }, [icalFeeds, syncFeed])
+
+  // Auto-sync all feeds on first load
   useEffect(() => {
-    if (icalUrl) syncIcal(icalUrl)
+    if (icalFeeds.length) syncAllFeeds(icalFeeds)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Merge iCal events with manual recurring events for today
+  // Merge all feed events + manual events for today
   const todayStr = getTodayStr()
   const allTodayEvents = useMemo(() => {
-    const manual = expandManualEvents(manualEvents, todayStr)
-    return [...calendarEvents, ...manual].sort((a, b) => a.start - b.start)
-  }, [calendarEvents, manualEvents, todayStr])
+    const fromFeeds = Object.values(feedEvents).flat()
+    const manual    = expandManualEvents(manualEvents, todayStr)
+    return [...fromFeeds, ...manual].sort((a, b) => a.start - b.start)
+  }, [feedEvents, manualEvents, todayStr])
 
   return (
     <div className="min-h-screen bg-[#FAFAFA]">
@@ -78,13 +99,13 @@ export default function App() {
       {settingsOpen && (
         <SettingsPanel
           onClose={() => setSettingsOpen(false)}
-          icalUrl={icalUrl}
-          setIcalUrl={setIcalUrl}
+          icalFeeds={icalFeeds}
+          setIcalFeeds={setIcalFeeds}
+          feedStatuses={feedStatuses}
+          onSyncFeed={syncFeed}
+          onSyncAll={() => syncAllFeeds()}
           manualEvents={manualEvents}
           setManualEvents={setManualEvents}
-          onIcalSync={syncIcal}
-          lastSynced={lastSynced}
-          icalError={icalError}
         />
       )}
     </div>
